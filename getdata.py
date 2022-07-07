@@ -1,5 +1,4 @@
 from datetime import datetime
-from pprint import pprint
 from pandas import DataFrame
 import requests
 
@@ -37,4 +36,4 @@ def format_data(data):
 
 if __name__ == "__main__":
     data = notion_api(DATABASE_ID)
-    print(data)
+    data.to_csv("laporan-keuangan.csv",index=False)
