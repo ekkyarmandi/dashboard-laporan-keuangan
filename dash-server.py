@@ -1,71 +1,168 @@
-### Starting Section
-import dash
-from dash import dcc, html
+### Import Libraries
 from dash.dependencies import Output, Input
-import plotly.express as px
 import dash_bootstrap_components as dbc
-import pandas as pd
-from datetime import datetime
+import plotly.express as px
+from dash import dcc, html
+import dash
 
+from datetime import datetime, timedelta
+from math import ceil
+import pandas as pd
+import numpy as np
+
+# ignore pandas warnings message
+import warnings
+warnings.filterwarnings("ignore")
+
+# define dash app
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    meta_tags=[{'name': 'viewport','content': 'width=device-width, initial-scale=1.0'}]
+    meta_tags=[{'name': 'viewport','content': 'width=device-width, initial-scale=1.0'}] # html meta tags
 )
 
 ### Data Reading Section
+bulan = [
+    "Januari",
+    "Februari",
+    "Maret",
+    "April",
+    "Mei",
+    "Juni",
+    "Juli",
+    "Agustus",
+    "September",
+    "Oktober",
+    "Novermber",
+    "Desember"
+]
 df = pd.read_csv("cash-flow.csv",encoding="utf-8")
+dff = df[df.Tipe=="Pengeluaran"]
+dff = dff[['Tanggal','Kategori','Out']]
+dff['Out'] = dff['Out'].apply(lambda n: n*-1)
+dff['date'] = dff['Tanggal'].apply(lambda d: datetime.strptime(d,"%B %d, %Y"))
+dff = dff.rename(columns={'Tanggal':'date_str','Out':'out','Kategori':'kategori'})
+
+# fill the missing date with zero
+td = dff.date.max() - dff.date.min()
+for i in range(td.days+1):
+    date = dff.date.min() + timedelta(days=i)
+    if date not in dff.date.to_list():
+        dff = dff.append({
+            'date_str': date.strftime("%B %d, %Y"),
+            'date': date,
+            'kategori': 'Lainnya',
+            'out': 0
+        }, ignore_index=True)
+dff['month_year'] = dff.date.apply(lambda d: f"{bulan[d.month-1]} {d.year}")
+dff = dff.sort_values('date')
 
 ### Data Function Processsing Section
-def category(month_year: str or int) -> pd.DataFrame:
-    '''Return spent dataframe based on category'''
+def daily_spent(month_year: str or int = None) -> pd.DataFrame:
+    '''Group the dataframe by dates and filter it by month_year if specified'''
 
-    columns = ['Out','Kategori','Tanggal']
-    dff = df[df['Tipe']=="Pengeluaran"]
-    dff = dff[columns]
-    dff['Out'] = dff['Out'].apply(lambda d: d*-1 if d < 0 else d)
-    dff['Tanggal'] = dff['Tanggal'].apply(lambda x: datetime.strptime(x,"%B %d, %Y"))
-    dff['Month_Year'] = dff['Tanggal'].apply(lambda date: f"{date.month_name()} {date.year}")
-    if month_year in dff.Month_Year.unique():
-        dff = dff[dff['Month_Year']==month_year]
-    min_date, max_date = dff['Tanggal'].min(), dff['Tanggal'].max()
-    dff = dff[['Kategori','Out']].groupby('Kategori',as_index=False).sum()
-    dff = dff.sort_values('Out')
-    return dff,(min_date,max_date)
+    data = dff[['date','out','month_year']]
+    if month_year in data.month_year.unique():
+        data = data[data.month_year==month_year]
+    data = data.groupby('date',as_index=False).sum()
+    data['idr'] = data.out.apply(lambda n: f"Rp{n:,d}")
+    data['date_str'] = data.date.apply(lambda d: d.strftime("%Y-%m-%d"))
+    return data
+
+def category_spent(month_year: str or int = None) -> pd.DataFrame:
+    '''Group the dataframe by kategori variable and filter it by month_year if specified'''
+
+    data = dff[['kategori','out','month_year']]
+    if month_year in data.month_year.unique():
+        data = data[data.month_year==month_year]
+    data = data.groupby('kategori',as_index=False).sum()
+    data['idr'] = data.out.apply(lambda n: f"Rp{n:,d}")
+    return data
 
 ### Layout Section
+
+# dropdown options
+options = ['Semua Bulan']
+for my in dff.month_year.unique():
+    options.append(my)
+
+# bootstrap container
 app.layout = dbc.Container([
     html.H1("Dashboard Laporan Keuangan",className="text-center text-success mt-5"),
     dbc.Col([
         html.Label("Bulan dan tahun"),
         dcc.Dropdown(
             id='month-year-dpdown',
-            options=['Sepanjang masa','May 2022','June 2022','July 2022'],
-            value='Sepanjang masa'
+            options=options,
+            value='Semua Bulan'
         )
     ],width=3),
-    dcc.Graph(id='pie-fig',figure={},style={'height':'500px'}),
-    dcc.Graph(id='bar-fig',figure={})
+    dcc.Graph(id='pie-chart',figure={},style={'height':'500px'}),
+    dcc.Graph(id='bar-chart',figure={}),
+    dcc.Graph(id='daily-spent',figure={})
 ])
 
 ### Callback Section
 @app.callback(
-    Output('bar-fig','figure'),
+    Output('bar-chart','figure'),
     Input('month-year-dpdown','value')
 )
-def barchart_category(value):
-    dff,min_max_date = category(value)
-    min_date, max_date = min_max_date
-    barfig = px.bar(dff, x='Out',y='Kategori',labels={"Out":"Pengeluaran"},title="Kategori Pengeluaran " + value)
-    return barfig
+def barchart_category(month_year):
+    data = category_spent(month_year)
+    data = data.sort_values('out')
+    fig = px.bar(
+        data,
+        x='out',
+        y='kategori',
+        text='idr',
+        labels={"out":"Pengeluaran"},
+        title="Pengeluara Berdasarkan Kategori"
+    )
+    fig.update_layout(title_x=0.5)
+    return fig
 
 @app.callback(
-    Output('pie-fig','figure'),
+    Output('pie-chart','figure'),
     Input('month-year-dpdown','value')
 )
-def piechart_category(value):
-    dff,_ = category(value)
-    fig = px.pie(dff, values='Out',names='Kategori',title="Kue Pengeluaran " + value)
+def piechart_category(month_year):
+    data = category_spent(month_year)
+    fig = px.pie(
+        data,
+        values='out',
+        names='kategori',
+        title="Pie Chart Kategori Pengeluaran"
+    )
+    fig.update_layout(title_x=0.5)
+    return fig
+
+@app.callback(
+    Output('daily-spent','figure'),
+    Input('month-year-dpdown','value')
+)
+def daily_spent_barchart(month_year):
+    data = daily_spent(month_year)
+
+    # customize y axis
+    value = data.out.max()/1e6
+    value = int(ceil(value)*1e6)
+    n = int(value/5e5)
+    values = [i*5e5 for i in range(n)]
+    value_str = [f"Rp{int(i):,d}" for i in values]
+
+    # plot
+    fig = px.bar(
+        data,
+        x='date',
+        y='out',
+        text='idr',
+        labels={'out':'Pengeluaran','date':'Tanggal'},
+        title='Pengeluaran Harian'
+    )
+    fig.update_yaxes(tickvals=values,ticktext=value_str)
+    fig.update_xaxes(tickvals=data.date,ticktext=data.date_str)
+    fig.update_traces(marker_color="orange")
+    fig.update_layout(title_x=0.5)
     return fig
 
 if __name__ == "__main__":
