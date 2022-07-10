@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 *__pycache__/
-credentials.py
-=======
 *.ipynb_checkpoints/
 *.ipynb
->>>>>>> aaf9c8f04a8ea55e975a20e2e70ba0b7bbfba0cf
+credentials.py
